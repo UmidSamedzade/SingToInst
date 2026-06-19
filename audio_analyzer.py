@@ -10,14 +10,16 @@ class AudioAnalyzer(QThread):
     note_updated = Signal(int, str, float, float)  # midi_num, note_name, start_time, duration
     note_ended = Signal(int, str, float, float)  # midi_num, note_name, start_time, duration
     level_updated = Signal(float)  # current RMS level (for volume meter)
+    time_updated = Signal(float)  # current audio timestamp (for synced playhead)
     finished_recording = Signal()
 
-    def __init__(self, device_id=None, samplerate=44100, blocksize=2048, silence_threshold=0.015):
+    def __init__(self, device_id=None, samplerate=44100, blocksize=2048, silence_threshold=0.015, mode='new'):
         super().__init__()
         self.device_id = device_id
         self.samplerate = samplerate
         self.blocksize = blocksize
         self.silence_threshold = silence_threshold
+        self.mode = mode
         
         self.audio_queue = queue.Queue()
         self.is_running = False
@@ -73,8 +75,11 @@ class AudioAnalyzer(QThread):
                     rms = np.sqrt(np.mean(signal**2))
                     self.level_updated.emit(float(rms))
 
-                    # Perform pitch detection
-                    f0 = self.detect_pitch(signal, self.samplerate)
+                    # Perform pitch detection based on mode
+                    if self.mode == 'new':
+                        f0 = self.detect_pitch_yin(signal, self.samplerate)
+                    else:
+                        f0 = self.detect_pitch(signal, self.samplerate)
                     midi_num, note_name = self.freq_to_note(f0)
 
                     # Debounce pitch changes (smooth out single-frame errors)
@@ -126,6 +131,7 @@ class AudioAnalyzer(QThread):
                             self.current_start_time = None
 
                     start_timestamp += time_per_block
+                    self.time_updated.emit(start_timestamp)
 
         except Exception as e:
             print(f"Error in audio stream: {e}", file=sys.stderr)
@@ -205,3 +211,65 @@ class AudioAnalyzer(QThread):
         note_name = NOTE_NAMES[midi_num % 12]
         octave = (midi_num // 12) - 1
         return f"{note_name}{octave}"
+
+    def detect_pitch_yin(self, signal, fs, min_freq=70, max_freq=800, threshold=0.15):
+        """YIN algorithm for highly accurate pitch detection."""
+        rms = np.sqrt(np.mean(signal**2))
+        if rms < self.silence_threshold:
+            return None
+
+        W = len(signal) // 2
+        tau_max = int(fs / min_freq)
+        tau_min = int(fs / max_freq)
+
+        if tau_max >= W:
+            tau_max = W - 1
+
+        # 1. Difference function
+        diff = np.zeros(tau_max)
+        for tau in range(1, tau_max):
+            diff[tau] = np.sum((signal[:W] - signal[tau:W+tau])**2)
+
+        # 2. Cumulative mean normalized difference function
+        running_sum = 0.0
+        yin_buffer = np.ones(tau_max)
+        for tau in range(1, tau_max):
+            running_sum += diff[tau]
+            if running_sum > 0:
+                yin_buffer[tau] = diff[tau] / (running_sum / tau)
+            else:
+                yin_buffer[tau] = 1.0
+
+        # 3. Absolute thresholding / Peak picking
+        tau = -1
+        for t in range(tau_min, tau_max):
+            if yin_buffer[t] < threshold:
+                tau = t
+                break
+
+        if tau == -1:
+            if tau_min < tau_max:
+                tau = np.argmin(yin_buffer[tau_min:tau_max]) + tau_min
+            else:
+                return None
+
+        # 4. Parabolic interpolation
+        if 0 < tau < tau_max - 1:
+            alpha = yin_buffer[tau - 1]
+            beta = yin_buffer[tau]
+            gamma = yin_buffer[tau + 1]
+            denom = (alpha - 2 * beta + gamma)
+            if abs(denom) > 1e-5:
+                p = 0.5 * (alpha - gamma) / denom
+                best_tau = tau + p
+            else:
+                best_tau = tau
+        else:
+            best_tau = tau
+
+        f0 = fs / best_tau
+
+        # Check if periodicity is strong enough
+        if yin_buffer[tau] < 0.45:
+            return f0
+        return None

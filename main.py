@@ -19,6 +19,7 @@ class SingToInstApp(QMainWindow):
         
         # Internal State
         self.analyzer = None
+        self.recognition_mode = 'new'  # default mode
         self.selected_input_device_id = sd.default.device[0]  # Default input
         self.selected_output_device_id = sd.default.device[1]  # Default output
         self.silence_threshold = 0.015
@@ -31,10 +32,7 @@ class SingToInstApp(QMainWindow):
         self.is_playing = False
         self.is_recording = False
         
-        # Real-time recording playhead timer
-        self.record_timer = QTimer()
-        self.record_timer.timeout.connect(self.advance_recording_playhead)
-        self.record_elapsed = 0.0
+
 
         self.init_ui()
 
@@ -210,17 +208,7 @@ class SingToInstApp(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
 
-        # Header Section
-        header_layout = QHBoxLayout()
-        title_vbox = QVBoxLayout()
-        title_label = QLabel("SingToInst Studio")
-        title_label.setObjectName("TitleLabel")
-        subtitle_label = QLabel("Sing or hum live to transcribe your voice into MIDI timeline notes.")
-        subtitle_label.setObjectName("SubtitleLabel")
-        title_vbox.addWidget(title_label)
-        title_vbox.addWidget(subtitle_label)
-        header_layout.addLayout(title_vbox)
-        layout.addLayout(header_layout)
+        
 
         # Controls Card
         control_card = QFrame()
@@ -295,9 +283,7 @@ class SingToInstApp(QMainWindow):
         card_layout.setContentsMargins(24, 24, 24, 24)
         card_layout.setSpacing(20)
 
-        title = QLabel("Audio Devices & Calibration")
-        title.setObjectName("SectionTitle")
-        card_layout.addWidget(title)
+
 
         form = QFormLayout()
         form.setSpacing(15)
@@ -394,6 +380,23 @@ class SingToInstApp(QMainWindow):
         threshold_vbox.addWidget(self.thresh_slider)
         form.addRow("Mic Sensitivity:", threshold_vbox)
 
+        # Recognition Mode Slider
+        mode_vbox = QVBoxLayout()
+        self.mode_label = QLabel(f"Recognition Mode: New")
+        self.mode_label.setStyleSheet("color: #E2E8F0; font-size: 13px;")
+        
+        self.mode_slider = QSlider(Qt.Horizontal)
+        self.mode_slider.setMinimum(0)
+        self.mode_slider.setMaximum(1)
+        self.mode_slider.setTickInterval(1)
+        self.mode_slider.setTickPosition(QSlider.TicksBelow)
+        self.mode_slider.setValue(1)  # 1 = New (default)
+        self.mode_slider.valueChanged.connect(self.recognition_mode_changed)
+        
+        mode_vbox.addWidget(self.mode_label)
+        mode_vbox.addWidget(self.mode_slider)
+        form.addRow("Recognition Mode:", mode_vbox)
+
         card_layout.addLayout(form)
         
         # Info box
@@ -446,15 +449,14 @@ class SingToInstApp(QMainWindow):
         self.status_lbl.setText("Recording live audio... Sing or hum now!")
         self.status_lbl.setStyleSheet("color: #EF4444; font-weight: bold;")
 
-        # Set up playhead timing for real-time draw
-        self.record_elapsed = 0.0
+        # Reset playhead
         self.timeline.set_playhead_time(0.0)
-        self.record_timer.start(50)  # Update playhead every 50ms
 
         # Start live audio analyzer
         self.analyzer = AudioAnalyzer(
             device_id=self.selected_input_device_id,
-            silence_threshold=self.silence_threshold
+            silence_threshold=self.silence_threshold,
+            mode=self.recognition_mode
         )
         
         # Connect signals
@@ -464,6 +466,7 @@ class SingToInstApp(QMainWindow):
         self.analyzer.note_ended.connect(lambda midi, name, start, duration: self.on_note_ended(track_idx, midi, name, start, duration))
         
         self.analyzer.level_updated.connect(self.update_mic_level)
+        self.analyzer.time_updated.connect(self.timeline.set_playhead_time)
         self.analyzer.finished_recording.connect(self.recording_thread_finished)
         
         self.analyzer.start()
@@ -471,7 +474,7 @@ class SingToInstApp(QMainWindow):
     def stop_recording(self):
         if self.analyzer:
             self.analyzer.stop()
-        self.record_timer.stop()
+
         self.is_recording = False
         self.rec_btn.setText("🔴 RECORD LIVE")
         self.rec_btn.setStyleSheet("")
@@ -485,12 +488,16 @@ class SingToInstApp(QMainWindow):
         self.timeline.clear_active_note()
         self.timeline.add_note_to_timeline(track_idx, midi, name, start, duration)
 
+    def recognition_mode_changed(self, value):
+        # 0 = Legacy (autocorrelation), 1 = New (YIN)
+        self.recognition_mode = 'legacy' if value == 0 else 'new'
+        mode_name = "Legacy" if value == 0 else "New"
+        self.mode_label.setText(f"Recognition Mode: {mode_name}")
+
     def recording_thread_finished(self):
         self.analyzer = None
 
-    def advance_recording_playhead(self):
-        self.record_elapsed += 0.05
-        self.timeline.set_playhead_time(self.record_elapsed)
+
 
     def update_mic_level(self, level):
         # Scale RMS level (0.0 to approx 0.15 for normal speech) to 0-100%
