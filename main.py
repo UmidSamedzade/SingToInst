@@ -294,11 +294,21 @@ class SingToInstApp(QMainWindow):
         form.setSpacing(15)
         form.setLabelAlignment(Qt.AlignRight)
 
-        # Query devices
+        # Query devices and filter by host API to avoid MME's 31-character limit
         devices = sd.query_devices()
+        hostapis = sd.query_hostapis()
+        
+        # Check if WASAPI is available on Windows (provides full device names and low latency)
+        has_wasapi = any(hostapis[d['hostapi']]['name'] == 'Windows WASAPI' for d in devices)
+        target_api = 'Windows WASAPI' if has_wasapi else None
+
         input_devices = []
         output_devices = []
         for i, d in enumerate(devices):
+            api_name = hostapis[d['hostapi']]['name']
+            if target_api and api_name != target_api:
+                continue
+                
             if d['max_input_channels'] > 0:
                 input_devices.append((i, d['name']))
             if d['max_output_channels'] > 0:
@@ -311,12 +321,22 @@ class SingToInstApp(QMainWindow):
         for idx, name in input_devices:
             self.input_combo.addItem(name, idx)
         
-        # Select default input
+        # Select default input by matching the name prefix (since default might be MME)
         try:
-            default_in = sd.default.device[0]
-            index_in = self.input_combo.findData(default_in)
-            if index_in >= 0:
-                self.input_combo.setCurrentIndex(index_in)
+            default_in_idx = sd.default.device[0]
+            if default_in_idx >= 0:
+                default_in_name = devices[default_in_idx]['name']
+                # Look for a match in our filtered input list
+                matched_idx = -1
+                for combobox_idx in range(self.input_combo.count()):
+                    item_name = self.input_combo.itemText(combobox_idx)
+                    if default_in_name in item_name or item_name in default_in_name:
+                        matched_idx = combobox_idx
+                        break
+                if matched_idx >= 0:
+                    self.input_combo.setCurrentIndex(matched_idx)
+                else:
+                    self.selected_input_device_id = self.input_combo.currentData()
         except Exception:
             pass
         self.input_combo.currentIndexChanged.connect(self.input_device_changed)
@@ -329,12 +349,22 @@ class SingToInstApp(QMainWindow):
         for idx, name in output_devices:
             self.output_combo.addItem(name, idx)
             
-        # Select default output
+        # Select default output by matching the name prefix
         try:
-            default_out = sd.default.device[1]
-            index_out = self.output_combo.findData(default_out)
-            if index_out >= 0:
-                self.output_combo.setCurrentIndex(index_out)
+            default_out_idx = sd.default.device[1]
+            if default_out_idx >= 0:
+                default_out_name = devices[default_out_idx]['name']
+                # Look for a match in our filtered output list
+                matched_idx = -1
+                for combobox_idx in range(self.output_combo.count()):
+                    item_name = self.output_combo.itemText(combobox_idx)
+                    if default_out_name in item_name or item_name in default_out_name:
+                        matched_idx = combobox_idx
+                        break
+                if matched_idx >= 0:
+                    self.output_combo.setCurrentIndex(matched_idx)
+                else:
+                    self.selected_output_device_id = self.output_combo.currentData()
         except Exception:
             pass
         self.output_combo.currentIndexChanged.connect(self.output_device_changed)
