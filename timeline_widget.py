@@ -114,7 +114,8 @@ class TimelineGridWidget(QWidget):
 
         # Draw backgrounds
         width = self.width()
-        height = self.height()
+        # Keep grid drawing bounded by track heights instead of stretched widget height
+        height = self.num_tracks * self.track_height + self.ruler_height
         
         # Main background
         painter.fillRect(0, 0, width, height, QColor("#121214"))
@@ -369,9 +370,9 @@ class TimelineWidget(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Fixed Headers Sidebar
+        # Fixed Headers Sidebar (aligned to top to match grid layout when expanded)
         self.headers = TrackHeaderWidget(self)
-        layout.addWidget(self.headers)
+        layout.addWidget(self.headers, alignment=Qt.AlignTop)
         
         # Scrollable Grid Area
         self.scroll_area = QScrollArea(self)
