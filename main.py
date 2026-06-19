@@ -1,23 +1,49 @@
 import sys
+import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QComboBox, QSlider, QProgressBar,
-    QFrame
+    QPushButton, QLabel, QComboBox, QSlider, QProgressBar,
+    QFrame, QTabWidget, QFormLayout
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QFont, QColor, QPalette
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QIcon
+
+import sounddevice as sd
+
+from audio_analyzer import AudioAnalyzer
+from timeline_widget import TimelineWidget
 
 class SingToInstApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        # Internal State
+        self.analyzer = None
+        self.selected_input_device_id = sd.default.device[0]  # Default input
+        self.selected_output_device_id = sd.default.device[1]  # Default output
+        self.silence_threshold = 0.015
+        
+        # Playback Timer State
+        self.playback_timer = QTimer()
+        self.playback_timer.timeout.connect(self.advance_playback)
+        self.play_start_time = 0.0
+        self.current_playhead = 0.0
+        self.is_playing = False
+        self.is_recording = False
+        
+        # Real-time recording playhead timer
+        self.record_timer = QTimer()
+        self.record_timer.timeout.connect(self.advance_recording_playhead)
+        self.record_elapsed = 0.0
+
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("SingToInst - Vocal to Instrument Converter")
-        self.resize(600, 520)
-        self.setMinimumSize(500, 480)
+        self.setWindowTitle("SingToInst - Multi-Track Vocal Studio")
+        self.resize(800, 600)
+        self.setMinimumSize(700, 500)
 
-        # Style sheet for dark mode high aesthetic look
+        # Style sheet for dark mode with window tab styling matching aesthetics
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #0F0F11;
@@ -25,6 +51,37 @@ class SingToInstApp(QMainWindow):
             QWidget {
                 color: #E2E8F0;
                 font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            }
+            QTabWidget::pane {
+                border: 1px solid #2D2D37;
+                background-color: #0F0F11;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #1E1E24;
+                border: 1px solid #2D2D37;
+                border-bottom-color: transparent;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                padding: 10px 20px;
+                color: #94A3B8;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QTabBar::tab:selected {
+                background-color: #0F0F11;
+                color: #F8FAFC;
+                border-bottom: 2px solid #8B5CF6;
+            }
+            QTabBar::tab:hover {
+                background-color: #2D2D37;
+                color: #F8FAFC;
+            }
+            QFrame#ControlCard, QFrame#SettingsCard {
+                background-color: #1E1E24;
+                border-radius: 12px;
+                border: 1px solid #2D2D37;
+                padding: 16px;
             }
             QLabel#TitleLabel {
                 font-size: 28px;
@@ -35,45 +92,50 @@ class SingToInstApp(QMainWindow):
                 font-size: 13px;
                 color: #94A3B8;
             }
-            QFrame#UploadCard, QFrame#SettingsCard {
-                background-color: #1E1E24;
-                border-radius: 12px;
-                border: 1px solid #2D2D37;
-            }
             QLabel#SectionTitle {
-                font-size: 15px;
+                font-size: 16px;
                 font-weight: 600;
                 color: #F8FAFC;
-                margin-bottom: 5px;
+                margin-bottom: 10px;
             }
-            QPushButton#UploadButton {
-                background-color: #2D2D37;
-                border: 2px dashed #4B5563;
-                border-radius: 8px;
-                color: #94A3B8;
-                font-size: 14px;
-                min-height: 60px;
-                text-align: center;
-            }
-            QPushButton#UploadButton:hover {
-                background-color: #374151;
-                border-color: #A78BFA;
-                color: #F8FAFC;
-            }
-            QPushButton#ConvertButton {
-                background-color: #8B5CF6;
+            QPushButton#RecordButton {
+                background-color: #EF4444;
                 border: none;
-                border-radius: 8px;
+                border-radius: 6px;
                 color: #FFFFFF;
-                font-size: 15px;
-                font-weight: 600;
-                min-height: 44px;
+                font-weight: bold;
+                font-size: 13px;
+                min-height: 36px;
+                padding: 0px 18px;
             }
-            QPushButton#ConvertButton:hover {
-                background-color: #7C3AED;
+            QPushButton#RecordButton:hover {
+                background-color: #DC2626;
             }
-            QPushButton#ConvertButton:pressed {
-                background-color: #6D28D9;
+            QPushButton#PlayButton {
+                background-color: #10B981;
+                border: none;
+                border-radius: 6px;
+                color: #FFFFFF;
+                font-weight: bold;
+                font-size: 13px;
+                min-height: 36px;
+                padding: 0px 18px;
+            }
+            QPushButton#PlayButton:hover {
+                background-color: #059669;
+            }
+            QPushButton#ClearButton {
+                background-color: #3F3F46;
+                border: none;
+                border-radius: 6px;
+                color: #E2E8F0;
+                font-weight: bold;
+                font-size: 13px;
+                min-height: 36px;
+                padding: 0px 18px;
+            }
+            QPushButton#ClearButton:hover {
+                background-color: #52525B;
             }
             QComboBox {
                 background-color: #0F0F11;
@@ -83,9 +145,6 @@ class SingToInstApp(QMainWindow):
                 color: #E2E8F0;
                 font-size: 13px;
                 min-height: 36px;
-            }
-            QSlider {
-                min-height: 30px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #2D2D37;
@@ -105,18 +164,16 @@ class SingToInstApp(QMainWindow):
                 margin-bottom: -4px;
                 border-radius: 7px;
             }
-            QProgressBar {
+            QProgressBar#MicLevelBar {
                 background-color: #0F0F11;
                 border: 1px solid #2D2D37;
-                border-radius: 6px;
+                border-radius: 4px;
                 text-align: center;
-                color: #FFFFFF;
-                font-weight: bold;
-                height: 20px;
+                height: 10px;
             }
-            QProgressBar::chunk {
-                background-color: #8B5CF6;
-                border-radius: 5px;
+            QProgressBar#MicLevelBar::chunk {
+                background-color: #10B981;
+                border-radius: 3px;
             }
             QLabel#StatusLabel {
                 font-size: 13px;
@@ -124,152 +181,329 @@ class SingToInstApp(QMainWindow):
             }
         """)
 
-        # Main Layout container
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
+        # Set up Tab System
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+
+        # Tab 1: Studio Workspace
+        self.studio_tab = QWidget()
+        self.init_studio_tab()
+        self.tab_widget.addTab(self.studio_tab, "Studio Workspace")
+
+        # Tab 2: Settings
+        self.settings_tab = QWidget()
+        self.init_settings_tab()
+        self.tab_widget.addTab(self.settings_tab, "Settings")
+
+    def init_studio_tab(self):
+        layout = QVBoxLayout(self.studio_tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
 
         # Header Section
-        header_layout = QVBoxLayout()
-        title_label = QLabel("SingToInst")
+        header_layout = QHBoxLayout()
+        title_vbox = QVBoxLayout()
+        title_label = QLabel("SingToInst Studio")
         title_label.setObjectName("TitleLabel")
-        subtitle_label = QLabel("Convert your vocal singing into synthetic instrument tracks in seconds.")
+        subtitle_label = QLabel("Sing or hum live to transcribe your voice into MIDI timeline notes.")
         subtitle_label.setObjectName("SubtitleLabel")
-        header_layout.addWidget(title_label)
-        header_layout.addWidget(subtitle_label)
-        main_layout.addLayout(header_layout)
+        title_vbox.addWidget(title_label)
+        title_vbox.addWidget(subtitle_label)
+        header_layout.addLayout(title_vbox)
+        layout.addLayout(header_layout)
 
-        # Upload Card
-        upload_card = QFrame()
-        upload_card.setObjectName("UploadCard")
-        upload_layout = QVBoxLayout(upload_card)
-        upload_layout.setContentsMargins(20, 20, 20, 20)
-        upload_layout.setSpacing(12)
-        
-        upload_title = QLabel("Vocal Audio Input")
-        upload_title.setObjectName("SectionTitle")
-        upload_layout.addWidget(upload_title)
+        # Controls Card
+        control_card = QFrame()
+        control_card.setObjectName("ControlCard")
+        control_layout = QHBoxLayout(control_card)
+        control_layout.setContentsMargins(16, 12, 16, 12)
+        control_layout.setSpacing(15)
 
-        self.upload_btn = QPushButton("Drag & Drop or Click to Select Audio (.wav, .mp3)")
-        self.upload_btn.setObjectName("UploadButton")
-        self.upload_btn.clicked.connect(self.select_audio_file)
-        upload_layout.addWidget(self.upload_btn)
-        
-        self.file_label = QLabel("No file selected")
-        self.file_label.setStyleSheet("color: #64748B; font-size: 12px; margin-top: 5px;")
-        upload_layout.addWidget(self.file_label)
-        
-        main_layout.addWidget(upload_card)
+        # Transport Buttons
+        self.rec_btn = QPushButton("🔴 RECORD LIVE")
+        self.rec_btn.setObjectName("RecordButton")
+        self.rec_btn.clicked.connect(self.toggle_recording)
+        control_layout.addWidget(self.rec_btn)
 
-        # Settings Card
+        self.play_btn = QPushButton("▶ PLAYBACK")
+        self.play_btn.setObjectName("PlayButton")
+        self.play_btn.clicked.connect(self.toggle_playback)
+        control_layout.addWidget(self.play_btn)
+
+        self.clear_btn = QPushButton("🧹 CLEAR")
+        self.clear_btn.setObjectName("ClearButton")
+        self.clear_btn.clicked.connect(self.clear_workspace)
+        control_layout.addWidget(self.clear_btn)
+
+        # Volume / Mic Input Level Meter
+        level_vbox = QVBoxLayout()
+        level_vbox.setSpacing(4)
+        level_lbl = QLabel("Mic Input Level")
+        level_lbl.setStyleSheet("font-size: 11px; color: #94A3B8; font-weight: bold;")
+        self.mic_level = QProgressBar()
+        self.mic_level.setObjectName("MicLevelBar")
+        self.mic_level.setMinimum(0)
+        self.mic_level.setMaximum(100)
+        self.mic_level.setValue(0)
+        self.mic_level.setTextVisible(False)
+        level_vbox.addWidget(level_lbl)
+        level_vbox.addWidget(self.mic_level)
+        control_layout.addLayout(level_vbox, stretch=1)
+
+        # Active Track Indicator Info
+        track_info_vbox = QVBoxLayout()
+        track_info_vbox.setSpacing(2)
+        active_lbl_title = QLabel("Recording Target:")
+        active_lbl_title.setStyleSheet("font-size: 11px; color: #94A3B8;")
+        self.active_track_lbl = QLabel("Vocal Input")
+        self.active_track_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #A78BFA;")
+        track_info_vbox.addWidget(active_lbl_title)
+        track_info_vbox.addWidget(self.active_track_lbl)
+        control_layout.addLayout(track_info_vbox)
+
+        layout.addWidget(control_card)
+
+        # Timeline Container
+        self.timeline = TimelineWidget(self)
+        self.timeline.headers.record_track_changed.connect(self.update_active_track_label)
+        layout.addWidget(self.timeline, stretch=1)
+
+        # Status / Feedback label
+        self.status_lbl = QLabel("Ready to record. Click REC to start.")
+        self.status_lbl.setObjectName("StatusLabel")
+        self.status_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_lbl)
+
+    def init_settings_tab(self):
+        layout = QVBoxLayout(self.settings_tab)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
         settings_card = QFrame()
         settings_card.setObjectName("SettingsCard")
-        settings_layout = QVBoxLayout(settings_card)
-        settings_layout.setContentsMargins(20, 20, 20, 20)
-        settings_layout.setSpacing(12)
+        card_layout = QVBoxLayout(settings_card)
+        card_layout.setContentsMargins(24, 24, 24, 24)
+        card_layout.setSpacing(20)
 
-        settings_title = QLabel("Conversion Parameters")
-        settings_title.setObjectName("SectionTitle")
-        settings_layout.addWidget(settings_title)
+        title = QLabel("Audio Devices & Calibration")
+        title.setObjectName("SectionTitle")
+        card_layout.addWidget(title)
 
-        # Form Layout fields
-        fields_layout = QHBoxLayout()
-        fields_layout.setSpacing(20)
+        form = QFormLayout()
+        form.setSpacing(15)
+        form.setLabelAlignment(Qt.AlignRight)
+
+        # Query devices
+        devices = sd.query_devices()
+        input_devices = []
+        output_devices = []
+        for i, d in enumerate(devices):
+            if d['max_input_channels'] > 0:
+                input_devices.append((i, d['name']))
+            if d['max_output_channels'] > 0:
+                output_devices.append((i, d['name']))
+
+        # Input Combo
+        self.input_combo = QComboBox()
+        for idx, name in input_devices:
+            self.input_combo.addItem(name, idx)
         
-        # Instrument selector
-        inst_vbox = QVBoxLayout()
-        inst_vbox.setSpacing(6)
-        inst_label = QLabel("Target Instrument:")
-        inst_label.setStyleSheet("font-size: 12px; color: #94A3B8;")
-        self.inst_combo = QComboBox()
-        self.inst_combo.addItems(["Synthesizer (Sine Wave)", "Grand Piano", "Violin", "Classic Flute", "808 Bass"])
-        inst_vbox.addWidget(inst_label)
-        inst_vbox.addWidget(self.inst_combo)
-        fields_layout.addLayout(inst_vbox)
+        # Select default input
+        try:
+            default_in = sd.default.device[0]
+            index_in = self.input_combo.findData(default_in)
+            if index_in >= 0:
+                self.input_combo.setCurrentIndex(index_in)
+        except Exception:
+            pass
+        self.input_combo.currentIndexChanged.connect(self.input_device_changed)
+        form.addRow("Recording Device:", self.input_combo)
 
-        # Sensitivity Slider
-        sens_vbox = QVBoxLayout()
-        sens_vbox.setSpacing(6)
-        sens_label = QLabel("Pitch Sensitivity (50%):")
-        sens_label.setStyleSheet("font-size: 12px; color: #94A3B8;")
-        self.sens_slider = QSlider(Qt.Horizontal)
-        self.sens_slider.setMinimum(10)
-        self.sens_slider.setMaximum(100)
-        self.sens_slider.setValue(50)
-        self.sens_slider.valueChanged.connect(self.update_slider_label)
-        self.sens_label_ref = sens_label # Keep reference to update text
+        # Output Combo
+        self.output_combo = QComboBox()
+        for idx, name in output_devices:
+            self.output_combo.addItem(name, idx)
+            
+        # Select default output
+        try:
+            default_out = sd.default.device[1]
+            index_out = self.output_combo.findData(default_out)
+            if index_out >= 0:
+                self.output_combo.setCurrentIndex(index_out)
+        except Exception:
+            pass
+        self.output_combo.currentIndexChanged.connect(self.output_device_changed)
+        form.addRow("Output Device:", self.output_combo)
+
+        # Threshold Slider
+        threshold_vbox = QVBoxLayout()
+        self.thresh_label = QLabel(f"Noise Gate Threshold ({int(self.silence_threshold * 1000)}):")
+        self.thresh_label.setStyleSheet("color: #E2E8F0; font-size: 13px;")
         
-        sens_vbox.addWidget(sens_label)
-        sens_vbox.addWidget(self.sens_slider)
-        fields_layout.addLayout(sens_vbox)
+        self.thresh_slider = QSlider(Qt.Horizontal)
+        self.thresh_slider.setMinimum(2)      # 0.002
+        self.thresh_slider.setMaximum(100)    # 0.100
+        self.thresh_slider.setValue(int(self.silence_threshold * 1000))
+        self.thresh_slider.valueChanged.connect(self.threshold_changed)
+        
+        threshold_vbox.addWidget(self.thresh_label)
+        threshold_vbox.addWidget(self.thresh_slider)
+        form.addRow("Mic Sensitivity:", threshold_vbox)
 
-        settings_layout.addLayout(fields_layout)
-        main_layout.addWidget(settings_card)
-
-        # Convert Action Button
-        self.convert_btn = QPushButton("Convert Singing to Instrument")
-        self.convert_btn.setObjectName("ConvertButton")
-        self.convert_btn.clicked.connect(self.start_conversion)
-        main_layout.addWidget(self.convert_btn)
-
-        # Progress / Status
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
-        main_layout.addWidget(self.progress_bar)
-
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("StatusLabel")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.status_label)
-
-        # Add a stretch to push everything to top if resized
-        main_layout.addStretch()
-
-    def select_audio_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Vocal Audio File", "", "Audio Files (*.wav *.mp3 *.ogg *.flac *.m4a)"
+        card_layout.addLayout(form)
+        
+        # Info box
+        info_lbl = QLabel(
+            "Note: Sing clearly near your microphone. Higher sensitivity gates out background hum.\n"
+            "The pitch-to-note analyzer maps vocal frequency inputs to standard MIDI coordinates in real-time."
         )
-        if file_path:
-            self.file_label.setText(file_path)
-            self.status_label.setText("Audio loaded successfully.")
-            self.status_label.setStyleSheet("color: #10B981;") # Green for success
+        info_lbl.setStyleSheet("color: #64748B; font-size: 12px; line-height: 1.5; margin-top: 10px;")
+        card_layout.addWidget(info_lbl)
 
-    def update_slider_label(self, value):
-        self.sens_label_ref.setText(f"Pitch Sensitivity ({value}%):")
+        layout.addWidget(settings_card)
+        layout.addStretch()
 
-    def start_conversion(self):
-        # Verify file is selected
-        if self.file_label.text() == "No file selected":
-            self.status_label.setText("Error: Please select a vocal audio file first.")
-            self.status_label.setStyleSheet("color: #EF4444;") # Red for error
+    def update_active_track_label(self, track_idx):
+        tracks = ["Vocal Input", "Synth Track", "Piano Track"]
+        self.active_track_lbl.setText(tracks[track_idx])
+
+    def input_device_changed(self):
+        self.selected_input_device_id = self.input_combo.currentData()
+
+    def output_device_changed(self):
+        self.selected_output_device_id = self.output_combo.currentData()
+
+    def threshold_changed(self, value):
+        self.silence_threshold = value / 1000.0
+        self.thresh_label.setText(f"Noise Gate Threshold ({value}):")
+        if self.analyzer:
+            self.analyzer.silence_threshold = self.silence_threshold
+
+    def toggle_recording(self):
+        if self.is_playing:
+            self.stop_playback()
+
+        if self.is_recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
+
+    def start_recording(self):
+        self.is_recording = True
+        self.rec_btn.setText("⏹ STOP RECORDING")
+        self.rec_btn.setStyleSheet("""
+            QPushButton#RecordButton {
+                background-color: #3F3F46;
+                border: 1px solid #EF4444;
+            }
+        """)
+        self.play_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
+        self.status_lbl.setText("Recording live audio... Sing or hum now!")
+        self.status_lbl.setStyleSheet("color: #EF4444; font-weight: bold;")
+
+        # Set up playhead timing for real-time draw
+        self.record_elapsed = 0.0
+        self.timeline.set_playhead_time(0.0)
+        self.record_timer.start(50)  # Update playhead every 50ms
+
+        # Start live audio analyzer
+        self.analyzer = AudioAnalyzer(
+            device_id=self.selected_input_device_id,
+            silence_threshold=self.silence_threshold
+        )
+        
+        # Connect signals
+        track_idx = self.timeline.get_active_record_track()
+        self.analyzer.note_started.connect(lambda midi, name, start: self.timeline.update_active_note(track_idx, midi, name, start, 0.1))
+        self.analyzer.note_updated.connect(lambda midi, name, start, duration: self.timeline.update_active_note(track_idx, midi, name, start, duration))
+        self.analyzer.note_ended.connect(lambda midi, name, start, duration: self.on_note_ended(track_idx, midi, name, start, duration))
+        
+        self.analyzer.level_updated.connect(self.update_mic_level)
+        self.analyzer.finished_recording.connect(self.recording_thread_finished)
+        
+        self.analyzer.start()
+
+    def stop_recording(self):
+        if self.analyzer:
+            self.analyzer.stop()
+        self.record_timer.stop()
+        self.is_recording = False
+        self.rec_btn.setText("🔴 RECORD LIVE")
+        self.rec_btn.setStyleSheet("")
+        self.play_btn.setEnabled(True)
+        self.clear_btn.setEnabled(True)
+        self.status_lbl.setText("Recording stopped. Notes added to timeline.")
+        self.status_lbl.setStyleSheet("color: #10B981;")
+        self.mic_level.setValue(0)
+
+    def on_note_ended(self, track_idx, midi, name, start, duration):
+        self.timeline.clear_active_note()
+        self.timeline.add_note_to_timeline(track_idx, midi, name, start, duration)
+
+    def recording_thread_finished(self):
+        self.analyzer = None
+
+    def advance_recording_playhead(self):
+        self.record_elapsed += 0.05
+        self.timeline.set_playhead_time(self.record_elapsed)
+
+    def update_mic_level(self, level):
+        # Scale RMS level (0.0 to approx 0.15 for normal speech) to 0-100%
+        scaled = min(int(level * 600), 100)
+        self.mic_level.setValue(scaled)
+
+    def toggle_playback(self):
+        if self.is_recording:
             return
 
-        self.convert_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.status_label.setText("Analyzing pitch and converting...")
-        self.status_label.setStyleSheet("color: #A78BFA;")
+        if self.is_playing:
+            self.stop_playback()
+        else:
+            self.start_playback()
 
-        # A simple simulated timer for visual progress
-        from PySide6.QtCore import QTimer
-        self.progress_value = 0
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.advance_progress)
-        self.timer.start(50) # Every 50ms
+    def start_playback(self):
+        self.is_playing = True
+        self.play_btn.setText("⏹ STOP PLAY")
+        self.play_btn.setStyleSheet("""
+            QPushButton#PlayButton {
+                background-color: #3F3F46;
+                border: 1px solid #10B981;
+            }
+        """)
+        self.rec_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
+        self.status_lbl.setText("Playing timeline notes...")
+        self.status_lbl.setStyleSheet("color: #10B981; font-weight: bold;")
+        
+        # Advance playhead from 0
+        self.current_playhead = 0.0
+        self.timeline.set_playhead_time(0.0)
+        self.playback_timer.start(50)  # tick every 50ms
 
-    def advance_progress(self):
-        self.progress_value += 2
-        self.progress_bar.setValue(self.progress_value)
-        if self.progress_value >= 100:
-            self.timer.stop()
-            self.convert_btn.setEnabled(True)
-            self.progress_bar.setVisible(False)
-            instrument = self.inst_combo.currentText()
-            self.status_label.setText(f"Successfully converted to {instrument}!")
-            self.status_label.setStyleSheet("color: #10B981;")
+    def stop_playback(self):
+        self.playback_timer.stop()
+        self.is_playing = False
+        self.play_btn.setText("▶ PLAYBACK")
+        self.play_btn.setStyleSheet("")
+        self.rec_btn.setEnabled(True)
+        self.clear_btn.setEnabled(True)
+        self.status_lbl.setText("Playback stopped.")
+        self.status_lbl.setStyleSheet("color: #94A3B8;")
+
+    def advance_playback(self):
+        self.current_playhead += 0.05
+        self.timeline.set_playhead_time(self.current_playhead)
+        
+        # Check if playhead has reached the end of the timeline
+        if self.current_playhead >= self.timeline.grid.timeline_duration:
+            self.stop_playback()
+
+    def clear_workspace(self):
+        self.timeline.clear_timeline()
+        self.status_lbl.setText("Timeline cleared.")
+        self.status_lbl.setStyleSheet("color: #94A3B8;")
+        self.mic_level.setValue(0)
 
 def main():
     app = QApplication(sys.argv)

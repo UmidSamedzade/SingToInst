@@ -1,4 +1,5 @@
 # Add project dependencies here
-# e.g., numpy, scipy, librosa, soundfile
 PySide6
+numpy
+sounddevice
 
