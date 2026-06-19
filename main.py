@@ -147,6 +147,15 @@ class SingToInstApp(QMainWindow):
                 min-height: 36px;
                 min-width: 250px;
             }
+            QComboBox QAbstractItemView {
+                background-color: #1E1E24;
+                border: 1px solid #2D2D37;
+                color: #E2E8F0;
+                font-size: 13px;
+                selection-background-color: #8B5CF6;
+                selection-color: #FFFFFF;
+                outline: 0px;
+            }
             QSlider::groove:horizontal {
                 border: 1px solid #2D2D37;
                 height: 6px;
