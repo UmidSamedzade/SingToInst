@@ -217,6 +217,18 @@ class SingToInstApp(QMainWindow):
         control_layout.setContentsMargins(16, 12, 16, 12)
         control_layout.setSpacing(15)
 
+        # Instrument Selector Dropdown
+        self.instrument_combo = QComboBox()
+        self.instrument_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        instruments = [
+            "🎤 Vocals", "🎹 Piano", "🎸 Guitar", "🎷 Saxophone",
+            "🎺 Trumpet", "🎻 Violin", "🥁 Drums", "🪈 Flute",
+            "🎵 Synth", "🪗 Accordion", "🪕 Banjo", "🎶 Bass"
+        ]
+        for inst in instruments:
+            self.instrument_combo.addItem(inst)
+        control_layout.addWidget(self.instrument_combo)
+
         # Transport Buttons
         self.rec_btn = QPushButton("🔴 RECORD LIVE")
         self.rec_btn.setObjectName("RecordButton")
@@ -251,9 +263,9 @@ class SingToInstApp(QMainWindow):
         # Active Track Indicator Info
         track_info_vbox = QVBoxLayout()
         track_info_vbox.setSpacing(2)
-        active_lbl_title = QLabel("Recording Target:")
+        active_lbl_title = QLabel("Recording To:")
         active_lbl_title.setStyleSheet("font-size: 11px; color: #94A3B8;")
-        self.active_track_lbl = QLabel("Vocal Input")
+        self.active_track_lbl = QLabel("🎤 Vocals")
         self.active_track_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #A78BFA;")
         track_info_vbox.addWidget(active_lbl_title)
         track_info_vbox.addWidget(self.active_track_lbl)
@@ -263,7 +275,6 @@ class SingToInstApp(QMainWindow):
 
         # Timeline Container
         self.timeline = TimelineWidget(self)
-        self.timeline.headers.record_track_changed.connect(self.update_active_track_label)
         layout.addWidget(self.timeline, stretch=1)
 
         # Status / Feedback label
@@ -411,8 +422,8 @@ class SingToInstApp(QMainWindow):
         layout.addStretch()
 
     def update_active_track_label(self, track_idx):
-        tracks = ["Vocal Input", "Synth Track", "Piano Track"]
-        self.active_track_lbl.setText(tracks[track_idx])
+        if track_idx < len(self.timeline.headers.track_names):
+            self.active_track_lbl.setText(self.timeline.headers.track_names[track_idx])
 
     def input_device_changed(self):
         self.selected_input_device_id = self.input_combo.currentData()
@@ -452,6 +463,11 @@ class SingToInstApp(QMainWindow):
         # Reset playhead
         self.timeline.set_playhead_time(0.0)
 
+        # Ensure track exists for the selected instrument
+        instrument_name = self.instrument_combo.currentText()
+        track_idx = self.timeline.ensure_track(instrument_name)
+        self.active_track_lbl.setText(instrument_name)
+
         # Start live audio analyzer
         self.analyzer = AudioAnalyzer(
             device_id=self.selected_input_device_id,
@@ -460,7 +476,6 @@ class SingToInstApp(QMainWindow):
         )
         
         # Connect signals
-        track_idx = self.timeline.get_active_record_track()
         self.analyzer.note_started.connect(lambda midi, name, start: self.timeline.update_active_note(track_idx, midi, name, start, 0.1))
         self.analyzer.note_updated.connect(lambda midi, name, start, duration: self.timeline.update_active_note(track_idx, midi, name, start, duration))
         self.analyzer.note_ended.connect(lambda midi, name, start, duration: self.on_note_ended(track_idx, midi, name, start, duration))

@@ -5,13 +5,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QLinearGradient, QFont
 
+
 class TimelineGridWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.pixels_per_second = 80
         self.timeline_duration = 30  # seconds
         self.track_height = 90
-        self.num_tracks = 3
+        self.num_tracks = 0  # Start with no tracks
         self.ruler_height = 25
         
         # Note range for vertical mapping within each track (C3 to C6)
@@ -20,7 +21,7 @@ class TimelineGridWidget(QWidget):
         
         # Notes storage: track_index -> list of dicts
         # dict: {'midi': int, 'name': str, 'start': float, 'duration': float}
-        self.notes = {0: [], 1: [], 2: []}
+        self.notes = {}
         
         # Active recording note
         # Dict: {'track': int, 'midi': int, 'name': str, 'start': float, 'duration': float}
@@ -31,9 +32,18 @@ class TimelineGridWidget(QWidget):
         
         self.update_widget_size()
 
+    def set_num_tracks(self, count):
+        self.num_tracks = count
+        # Ensure notes dict has entries for all tracks
+        for i in range(count):
+            if i not in self.notes:
+                self.notes[i] = []
+        self.update_widget_size()
+        self.update()
+
     def update_widget_size(self):
         width = self.timeline_duration * self.pixels_per_second + 50
-        height = self.num_tracks * self.track_height + self.ruler_height
+        height = max(self.num_tracks, 1) * self.track_height + self.ruler_height
         self.setFixedSize(width, height)
 
     def set_duration(self, seconds):
@@ -43,7 +53,8 @@ class TimelineGridWidget(QWidget):
             self.update()
 
     def clear_timeline(self):
-        self.notes = {0: [], 1: [], 2: []}
+        self.notes = {}
+        self.num_tracks = 0
         self.active_note = None
         self.playhead_time = 0.0
         self.timeline_duration = 30
@@ -51,6 +62,8 @@ class TimelineGridWidget(QWidget):
         self.update()
 
     def add_note(self, track_idx, midi, name, start, duration):
+        if track_idx not in self.notes:
+            self.notes[track_idx] = []
         note = {'midi': midi, 'name': name, 'start': start, 'duration': duration}
         self.notes[track_idx].append(note)
         
@@ -114,8 +127,9 @@ class TimelineGridWidget(QWidget):
 
         # Draw backgrounds
         width = self.width()
+        display_tracks = max(self.num_tracks, 1)
         # Keep grid drawing bounded by track heights instead of stretched widget height
-        height = self.num_tracks * self.track_height + self.ruler_height
+        height = display_tracks * self.track_height + self.ruler_height
         
         # Main background
         painter.fillRect(0, 0, width, height, QColor("#121214"))
@@ -148,10 +162,18 @@ class TimelineGridWidget(QWidget):
             painter.drawText(x + 4, self.ruler_height - 6, f"{sec}s")
 
         # Draw horizontal track separators
-        for i in range(self.num_tracks + 1):
+        for i in range(display_tracks + 1):
             y = self.ruler_height + i * self.track_height
-            painter.setPen(QPen(QColor("#27272A"), 1 if i < self.num_tracks else 2))
+            painter.setPen(QPen(QColor("#27272A"), 1 if i < display_tracks else 2))
             painter.drawLine(0, y, width, y)
+
+        # Draw "no tracks" placeholder if empty
+        if self.num_tracks == 0:
+            painter.setPen(QColor("#52525B"))
+            painter.setFont(QFont("Segoe UI", 11))
+            center_y = self.ruler_height + self.track_height // 2
+            painter.drawText(QRectF(0, self.ruler_height, width, self.track_height),
+                             Qt.AlignCenter, "Select an instrument and press RECORD to begin")
 
         # Draw recorded notes
         for track_idx, note_list in self.notes.items():
@@ -231,116 +253,152 @@ class TrackHeaderWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.track_names = ["Vocal Input", "Synth Track", "Piano Track"]
+        self.track_names = []
         self.track_height = 90
         self.ruler_height = 25
         
         self.active_record_track = 0
-        self.mutes = [False, False, False]
+        self.mutes = []
+        self.track_frames = []
         
         self.setFixedWidth(160)
-        self.setFixedHeight(len(self.track_names) * self.track_height + self.ruler_height)
         
-        self.init_ui()
-
-    def init_ui(self):
-        # We will manually position our UI controls relative to the tracks
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, self.ruler_height, 0, 0)
-        layout.setSpacing(0)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, self.ruler_height, 0, 0)
+        self.main_layout.setSpacing(0)
         
         self.bg_group = QButtonGroup(self)
         self.bg_group.setExclusive(True)
-        
-        for i, name in enumerate(self.track_names):
-            track_frame = QFrame()
-            track_frame.setFrameShape(QFrame.NoFrame)
-            track_frame.setFixedHeight(self.track_height)
-            track_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #1A1A1E;
-                    border-bottom: 1px solid #27272A;
-                    border-right: 2px solid #2D2D37;
-                }
-            """)
-            
-            frame_layout = QVBoxLayout(track_frame)
-            frame_layout.setContentsMargins(12, 10, 12, 10)
-            frame_layout.setSpacing(6)
-            
-            # Title
-            title_lbl = QLabel(name)
-            title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #F1F5F9; border: none; background: transparent;")
-            frame_layout.addWidget(title_lbl)
-            
-            # Buttons
-            btn_layout = QHBoxLayout()
-            btn_layout.setSpacing(8)
-            
-            # Record enable button
-            rec_btn = QPushButton("REC")
-            rec_btn.setCheckable(True)
-            rec_btn.setChecked(i == 0)
-            rec_btn.setObjectName(f"rec_btn_{i}")
-            rec_btn.setFixedSize(45, 22)
-            rec_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2D2D37;
-                    border: 1px solid #3F3F46;
-                    border-radius: 4px;
-                    color: #94A3B8;
-                    font-size: 10px;
-                    font-weight: bold;
-                }
-                QPushButton:checked {
-                    background-color: #EF4444;
-                    border-color: #DC2626;
-                    color: #FFFFFF;
-                }
-                QPushButton:hover {
-                    border-color: #71717A;
-                }
-            """)
-            self.bg_group.addButton(rec_btn, i)
-            btn_layout.addWidget(rec_btn)
-            
-            # Mute button
-            mute_btn = QPushButton("MUTE")
-            mute_btn.setCheckable(True)
-            mute_btn.setObjectName(f"mute_btn_{i}")
-            mute_btn.setFixedSize(45, 22)
-            mute_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2D2D37;
-                    border: 1px solid #3F3F46;
-                    border-radius: 4px;
-                    color: #94A3B8;
-                    font-size: 9px;
-                    font-weight: bold;
-                }
-                QPushButton:checked {
-                    background-color: #F59E0B;
-                    border-color: #D97706;
-                    color: #FFFFFF;
-                }
-                QPushButton:hover {
-                    border-color: #71717A;
-                }
-            """)
-            mute_btn.toggled.connect(lambda checked, idx=i: self.set_mute(idx, checked))
-            btn_layout.addWidget(mute_btn)
-            
-            frame_layout.addLayout(btn_layout)
-            layout.addWidget(track_frame)
-            
         self.bg_group.idClicked.connect(self.record_track_toggled)
+        
+        self._update_height()
+
+    def _update_height(self):
+        count = max(len(self.track_names), 1)
+        self.setFixedHeight(count * self.track_height + self.ruler_height)
+
+    def add_track(self, name):
+        """Add a new track with the given instrument name. Returns the track index."""
+        idx = len(self.track_names)
+        self.track_names.append(name)
+        self.mutes.append(False)
+        
+        track_frame = QFrame()
+        track_frame.setFrameShape(QFrame.NoFrame)
+        track_frame.setFixedHeight(self.track_height)
+        track_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1A1A1E;
+                border-bottom: 1px solid #27272A;
+                border-right: 2px solid #2D2D37;
+            }
+        """)
+        
+        frame_layout = QVBoxLayout(track_frame)
+        frame_layout.setContentsMargins(12, 10, 12, 10)
+        frame_layout.setSpacing(6)
+        
+        # Title
+        title_lbl = QLabel(name)
+        title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #F1F5F9; border: none; background: transparent;")
+        frame_layout.addWidget(title_lbl)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        # Record enable button
+        rec_btn = QPushButton("REC")
+        rec_btn.setCheckable(True)
+        rec_btn.setChecked(idx == 0)
+        rec_btn.setObjectName(f"rec_btn_{idx}")
+        rec_btn.setFixedSize(45, 22)
+        rec_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2D2D37;
+                border: 1px solid #3F3F46;
+                border-radius: 4px;
+                color: #94A3B8;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #EF4444;
+                border-color: #DC2626;
+                color: #FFFFFF;
+            }
+            QPushButton:hover {
+                border-color: #71717A;
+            }
+        """)
+        self.bg_group.addButton(rec_btn, idx)
+        btn_layout.addWidget(rec_btn)
+        
+        # Mute button
+        mute_btn = QPushButton("MUTE")
+        mute_btn.setCheckable(True)
+        mute_btn.setObjectName(f"mute_btn_{idx}")
+        mute_btn.setFixedSize(45, 22)
+        mute_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2D2D37;
+                border: 1px solid #3F3F46;
+                border-radius: 4px;
+                color: #94A3B8;
+                font-size: 9px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #F59E0B;
+                border-color: #D97706;
+                color: #FFFFFF;
+            }
+            QPushButton:hover {
+                border-color: #71717A;
+            }
+        """)
+        mute_btn.toggled.connect(lambda checked, i=idx: self.set_mute(i, checked))
+        btn_layout.addWidget(mute_btn)
+        
+        frame_layout.addLayout(btn_layout)
+        self.main_layout.addWidget(track_frame)
+        self.track_frames.append(track_frame)
+        
+        # Set REC active on the new track
+        self.active_record_track = idx
+        rec_btn.setChecked(True)
+        
+        self._update_height()
+        return idx
+
+    def get_track_index_by_name(self, name):
+        """Return the track index for the given name, or -1 if not found."""
+        for i, n in enumerate(self.track_names):
+            if n == name:
+                return i
+        return -1
+
+    def clear_tracks(self):
+        """Remove all tracks."""
+        for frame in self.track_frames:
+            self.main_layout.removeWidget(frame)
+            frame.deleteLater()
+        # Remove buttons from the group
+        for btn in self.bg_group.buttons():
+            self.bg_group.removeButton(btn)
+        self.track_frames = []
+        self.track_names = []
+        self.mutes = []
+        self.active_record_track = 0
+        self._update_height()
 
     def record_track_toggled(self, track_idx):
         self.active_record_track = track_idx
         self.record_track_changed.emit(track_idx)
 
     def set_mute(self, track_idx, is_muted):
-        self.mutes[track_idx] = is_muted
+        if track_idx < len(self.mutes):
+            self.mutes[track_idx] = is_muted
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -419,6 +477,14 @@ class TimelineWidget(QFrame):
     def get_active_record_track(self):
         return self.headers.active_record_track
 
+    def ensure_track(self, instrument_name):
+        """Ensure a track for the given instrument exists. Creates one if needed. Returns track index."""
+        idx = self.headers.get_track_index_by_name(instrument_name)
+        if idx == -1:
+            idx = self.headers.add_track(instrument_name)
+            self.grid.set_num_tracks(len(self.headers.track_names))
+        return idx
+
     def add_note_to_timeline(self, track_idx, midi, name, start, duration):
         self.grid.add_note(track_idx, midi, name, start, duration)
 
@@ -449,3 +515,4 @@ class TimelineWidget(QFrame):
 
     def clear_timeline(self):
         self.grid.clear_timeline()
+        self.headers.clear_tracks()
