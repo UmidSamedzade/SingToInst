@@ -14,8 +14,8 @@ class SingToInstApp(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("SingToInst - Vocal to Instrument Converter")
-        self.resize(600, 500)
-        self.setMinimumSize(500, 450)
+        self.resize(600, 520)
+        self.setMinimumSize(500, 480)
 
         # Style sheet for dark mode high aesthetic look
         self.setStyleSheet("""
@@ -30,24 +30,21 @@ class SingToInstApp(QMainWindow):
                 font-size: 28px;
                 font-weight: 800;
                 color: #A78BFA;
-                margin-bottom: 5px;
             }
             QLabel#SubtitleLabel {
                 font-size: 13px;
                 color: #94A3B8;
-                margin-bottom: 20px;
             }
             QFrame#UploadCard, QFrame#SettingsCard {
                 background-color: #1E1E24;
                 border-radius: 12px;
                 border: 1px solid #2D2D37;
-                padding: 16px;
             }
             QLabel#SectionTitle {
                 font-size: 15px;
                 font-weight: 600;
                 color: #F8FAFC;
-                margin-bottom: 10px;
+                margin-bottom: 5px;
             }
             QPushButton#UploadButton {
                 background-color: #2D2D37;
@@ -55,7 +52,7 @@ class SingToInstApp(QMainWindow):
                 border-radius: 8px;
                 color: #94A3B8;
                 font-size: 14px;
-                padding: 20px;
+                min-height: 60px;
                 text-align: center;
             }
             QPushButton#UploadButton:hover {
@@ -70,7 +67,7 @@ class SingToInstApp(QMainWindow):
                 color: #FFFFFF;
                 font-size: 15px;
                 font-weight: 600;
-                padding: 12px;
+                min-height: 44px;
             }
             QPushButton#ConvertButton:hover {
                 background-color: #7C3AED;
@@ -82,12 +79,13 @@ class SingToInstApp(QMainWindow):
                 background-color: #0F0F11;
                 border: 1px solid #3F3F46;
                 border-radius: 6px;
-                padding: 8px 12px;
+                padding: 6px 12px;
                 color: #E2E8F0;
                 font-size: 13px;
+                min-height: 36px;
             }
-            QComboBox::drop-down {
-                border: none;
+            QSlider {
+                min-height: 30px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #2D2D37;
@@ -114,7 +112,7 @@ class SingToInstApp(QMainWindow):
                 text-align: center;
                 color: #FFFFFF;
                 font-weight: bold;
-                height: 18px;
+                height: 20px;
             }
             QProgressBar::chunk {
                 background-color: #8B5CF6;
@@ -147,6 +145,8 @@ class SingToInstApp(QMainWindow):
         upload_card = QFrame()
         upload_card.setObjectName("UploadCard")
         upload_layout = QVBoxLayout(upload_card)
+        upload_layout.setContentsMargins(20, 20, 20, 20)
+        upload_layout.setSpacing(12)
         
         upload_title = QLabel("Vocal Audio Input")
         upload_title.setObjectName("SectionTitle")
@@ -167,6 +167,8 @@ class SingToInstApp(QMainWindow):
         settings_card = QFrame()
         settings_card.setObjectName("SettingsCard")
         settings_layout = QVBoxLayout(settings_card)
+        settings_layout.setContentsMargins(20, 20, 20, 20)
+        settings_layout.setSpacing(12)
 
         settings_title = QLabel("Conversion Parameters")
         settings_title.setObjectName("SectionTitle")
@@ -174,9 +176,11 @@ class SingToInstApp(QMainWindow):
 
         # Form Layout fields
         fields_layout = QHBoxLayout()
+        fields_layout.setSpacing(20)
         
         # Instrument selector
         inst_vbox = QVBoxLayout()
+        inst_vbox.setSpacing(6)
         inst_label = QLabel("Target Instrument:")
         inst_label.setStyleSheet("font-size: 12px; color: #94A3B8;")
         self.inst_combo = QComboBox()
@@ -187,6 +191,7 @@ class SingToInstApp(QMainWindow):
 
         # Sensitivity Slider
         sens_vbox = QVBoxLayout()
+        sens_vbox.setSpacing(6)
         sens_label = QLabel("Pitch Sensitivity (50%):")
         sens_label.setStyleSheet("font-size: 12px; color: #94A3B8;")
         self.sens_slider = QSlider(Qt.Horizontal)
