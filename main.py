@@ -3,7 +3,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QSlider, QProgressBar,
-    QFrame, QTabWidget, QFormLayout
+    QFrame, QTabWidget, QFormLayout, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon
@@ -141,10 +141,11 @@ class SingToInstApp(QMainWindow):
                 background-color: #0F0F11;
                 border: 1px solid #3F3F46;
                 border-radius: 6px;
-                padding: 6px 12px;
+                padding: 6px 24px 6px 12px;
                 color: #E2E8F0;
                 font-size: 13px;
                 min-height: 36px;
+                min-width: 250px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #2D2D37;
@@ -305,6 +306,8 @@ class SingToInstApp(QMainWindow):
 
         # Input Combo
         self.input_combo = QComboBox()
+        self.input_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.input_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for idx, name in input_devices:
             self.input_combo.addItem(name, idx)
         
@@ -321,6 +324,8 @@ class SingToInstApp(QMainWindow):
 
         # Output Combo
         self.output_combo = QComboBox()
+        self.output_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.output_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for idx, name in output_devices:
             self.output_combo.addItem(name, idx)
             
